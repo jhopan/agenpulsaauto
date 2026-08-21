@@ -108,6 +108,8 @@ def run_order(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--login", action="store_true", help="buka browser untuk login manual, cookies tersimpan di folder profile")
+    ap.add_argument("--logout", action="store_true", help="hapus sesi login (untuk ganti akun)")
+    ap.add_argument("--import-zip", help="import folder profile/cookies dari file zip")
     ap.add_argument("--nomor", help="nomor HP tujuan")
     ap.add_argument("--tab", default="Paket Kuota", help="nama tab produk, misal: Pulsa, Paket Kuota, Paket Internet")
     ap.add_argument("--cari", help="kata kunci paket untuk dicari (ctrl+f style)")
@@ -115,6 +117,32 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="berhenti sebelum klik Order Sekarang")
     ap.add_argument("--headed", action="store_true", help="tampilkan browser")
     args = ap.parse_args()
+
+    if args.logout:
+        import shutil
+        if os.path.exists(PROFILE):
+            shutil.rmtree(PROFILE, ignore_errors=True)
+            print("Sesi login (folder profile) berhasil dihapus. Silakan login kembali.")
+        else:
+            print("Tidak ada sesi login (folder profile tidak ditemukan).")
+        return
+
+    if args.import_zip:
+        import zipfile
+        import shutil
+        filepath = args.import_zip
+        if not os.path.isfile(filepath):
+            print(f"Error: file '{filepath}' tidak ditemukan.")
+            return
+        try:
+            if os.path.exists(PROFILE):
+                shutil.rmtree(PROFILE, ignore_errors=True)
+            with zipfile.ZipFile(filepath, 'r') as zip_ref:
+                zip_ref.extractall(PROFILE)
+            print("Berhasil mengimpor cookies dari file zip.")
+        except Exception as e:
+            print(f"Error saat impor zip: {e}")
+        return
 
     if args.login:
         with sync_playwright() as p:
