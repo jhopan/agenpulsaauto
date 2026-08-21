@@ -1,3 +1,14 @@
 [
-  {"label": "Ilmupedia 22GB 7hr", "tab": "Paket Kuota", "cari": "Ilmupedia 22GB", "voucher": "10137"}
+  {
+    "label": "Ilmupedia 22GB 7hr",
+    "tab": "Paket Kuota",
+    "cari": "Ilmupedia 22GB",
+    "voucher": "10137"
+  },
+  {
+    "label": "Kuota Game 1GB, 30 Hari",
+    "tab": "Paket Kuota",
+    "cari": "Kuota Game 1GB, 30 Hari",
+    "voucher": "7508"
+  }
 ]

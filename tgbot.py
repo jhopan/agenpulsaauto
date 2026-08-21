@@ -39,10 +39,8 @@ pending = {}
 
 NOMOR_RE = re.compile(r"^(08|\+62|62)\d{8,13}$")
 JAM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
-TANGGAL_JAM_RE = re.compile(r"^(\d{1,2})[-/](\d{1,2})(?:[-/](\d{2}|\d{4}))?\s+([01]?\d|2[0-3]):([0-5]\d)$")
-INTERVAL_RE = re.compile(r"^(\d{1,2})\s+([01]?\d|2[0-3]):([0-5]\d)$")
-TANGGAL_JAM_RE = re.compile(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{1,2}|(\d{4}))\s+([01]?\d|2[0-3]):([0-5]\d)$")
-INTERVAL_RE = re.compile(r"^(\d{1,2})\s+([01]?\d|2[0-3]):([0-5]\d)$")
+TANGGAL_JAM_RE = re.compile(r"^\s*(\d{1,2})\s*[-/]\s*(\d{1,2})(?:\s*[-/]\s*(\d{2}|\d{4}))?\s+([01]?\d|2[0-3])\s*:\s*([0-5]\d)\s*$")
+INTERVAL_RE = re.compile(r"^\s*(\d{1,2})\s+([01]?\d|2[0-3])\s*:\s*([0-5]\d)\s*$")
 
 
 def save_contacts():
@@ -51,6 +49,9 @@ def save_contacts():
 
 def save_schedules():
     json.dump(schedules, open(SCHEDULES_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+def save_shortcuts():
+    json.dump(SHORTCUTS, open(os.path.join(HERE, "shortcuts.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
 
 def allowed(update: Update) -> bool:
@@ -62,6 +63,7 @@ def menu_kb():
     for i, sc in enumerate(SHORTCUTS):
         rows.append([InlineKeyboardButton(sc["label"], callback_data=f"sc:{i}")])
     rows.append([InlineKeyboardButton("Cari Paket Lain", callback_data="cari")])
+    rows.append([InlineKeyboardButton("Tambah Shortcut", callback_data="add_sc")])
     rows.append([InlineKeyboardButton("Jadwal Auto", callback_data="jadwal"), InlineKeyboardButton("Kontak", callback_data="kontak")])
     return InlineKeyboardMarkup(rows)
 
@@ -109,6 +111,24 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(f"Paket: {sc['label']}\nPilih nomor tujuan:", reply_markup=contact_kb("nomor"))
         else:
             await q.edit_message_text(f"Paket: {sc['label']}\nKirim nomor HP tujuan (contoh 081234567890):")
+
+    elif data == "add_sc":
+        pending[uid] = {"mode": "add_sc_tab"}
+        await q.answer()
+        tabs = ["Pulsa", "Paket Kuota", "Paket Internet", "Token PLN", "Game", "Voucher Internet"]
+        rows = [[InlineKeyboardButton(t, callback_data=f"set_tab:{t}")] for t in tabs]
+        await q.edit_message_text("Pilih tab produk untuk shortcut baru:", reply_markup=InlineKeyboardMarkup(rows))
+
+    elif data.startswith("set_tab:"):
+        tab = data.split(":", 1)[1]
+        job = pending.get(uid)
+        if not job or job.get("mode") != "add_sc_tab":
+            await q.answer("Tidak ada proses aktif")
+            return
+        job["tab"] = tab
+        job["mode"] = "add_sc_nomor"
+        await q.answer()
+        await q.edit_message_text(f"Tab: {tab}\n\nKirim nomor HP tujuan sebagai pancingan (contoh 081234... untuk Telkomsel, 0877... untuk XL) agar daftar paket muncul:")
 
     elif data == "cari":
         pending[uid] = {"cari_mode": True}
@@ -242,6 +262,60 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     mode = job.get("mode")
 
+    if mode == "add_sc_nomor":
+        nomor = text.replace("-", "").replace(" ", "")
+        if not NOMOR_RE.match(nomor):
+            await update.message.reply_text("Nomor tidak valid. Kirim nomor format 08xxxxxxxxxx:")
+            return
+        job["nomor_pancingan"] = nomor
+        job["mode"] = "add_sc_keyword"
+        await update.message.reply_text(f"Pancingan nomor {nomor} diterima.\n\nKetik kata kunci pencarian (misal 'Ilmupedia 22GB'):")
+        return
+
+    if mode == "add_sc_keyword":
+        job["cari"] = text
+        job["mode"] = "add_sc_label"
+        await update.message.reply_text(f"Kata kunci: '{text}'\n\nKetik nama tombol/label shortcut yang akan tampil di menu (misal 'Ilmupedia 22GB 7hr'):")
+        return
+
+    if mode == "add_sc_label":
+        label = text
+        tab = job["tab"]
+        cari = job["cari"]
+        nomor_pancingan = job["nomor_pancingan"]
+        
+        await update.message.reply_text("Mencari ID Voucher paket ke website, tunggu sebentar...")
+        
+        from bot import search_packages
+        try:
+            results = await asyncio.to_thread(search_packages, tab, cari, nomor_pancingan)
+            if not results:
+                await update.message.reply_text(f"Paket tidak ditemukan untuk operator nomor {nomor_pancingan}! Coba lagi dengan kata kunci lain atau periksa tab.", reply_markup=menu_kb())
+                pending.pop(uid, None)
+                return
+            
+            # Ambil paket pertama yang match
+            paket = results[0]
+            voucher = paket.get("voucher")
+            
+            SHORTCUTS.append({
+                "label": label,
+                "tab": tab,
+                "cari": cari,
+                "voucher": voucher
+            })
+            save_shortcuts()
+            pending.pop(uid, None)
+            
+            await update.message.reply_text(
+                f"Shortcut berhasil ditambahkan!\n\nLabel: {label}\nPaket: {paket.get('teks')}\nVoucher ID: {voucher}",
+                reply_markup=menu_kb()
+            )
+        except Exception as e:
+            await update.message.reply_text(f"Error saat mencari paket: {e}", reply_markup=menu_kb())
+            pending.pop(uid, None)
+        return
+
     if mode == "kontak_nama":
         nama = text
         job["kontak_nama"] = nama
@@ -280,8 +354,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         job["nomor"] = nomor
         del job["tunggu_nomor"]
         if mode == "jadwal_kontak":
-            job["mode"] = "jadwal_jam"
-            await update.message.reply_text("Kirim jam beli tiap hari, format HH:MM (WIT). Contoh: 07:30")
+            job["mode"] = "jadwal_tipe"
+            await update.message.reply_text("Pilih tipe jadwal:", reply_markup=jadwal_tipe_kb())
         else:
             await update.message.reply_text(
                 f"Konfirmasi pembelian:\nPaket: {job.get('label', job['cari'])}\nNomor: {nomor}\n\nLanjut beli?",
@@ -337,8 +411,11 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             thn = now.year
             from datetime import datetime as _dt
-            if _dt(thn, bln, hari, jam, menit, tzinfo=TZ) <= now:
-                thn += 1
+            try:
+                if _dt(thn, bln, hari, jam, menit, tzinfo=TZ) <= now:
+                    thn += 1
+            except ValueError:
+                pass
         from datetime import datetime as _dt
         try:
             run_at = _dt(thn, bln, hari, jam, menit, tzinfo=TZ)
