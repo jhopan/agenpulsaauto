@@ -138,16 +138,46 @@ class App:
         self.update_status(False, "-")
 
     def on_login(self):
-        self.write_log("Buka browser untuk login manual...")
+        self.write_log("Pilih Mode Login:")
+        
+        popup = tk.Toplevel(self.root)
+        popup.title("Login")
+        popup.geometry("300x120")
+        popup.resizable(False, False)
+        
+        def via_browser():
+            popup.destroy()
+            self.write_log("Membuka browser untuk login manual...")
+            def work():
+                try:
+                    login_manual()
+                except Exception as e:
+                    self.root.after(0, lambda: self.write_log(f"ERROR login: {e}"))
+                self.root.after(0, self.on_cek)
+            threading.Thread(target=work, daemon=True).start()
+            
+        def via_cookies():
+            popup.destroy()
+            import tkinter.filedialog as fd
+            import zipfile
+            filepath = fd.askopenfilename(title="Pilih Zip Folder Profile", filetypes=[("Zip files", "*.zip")])
+            if filepath:
+                self.write_log("Mengekstrak cookies dari zip...")
+                def work():
+                    try:
+                        if os.path.exists(PROFILE):
+                            shutil.rmtree(PROFILE, ignore_errors=True)
+                        with zipfile.ZipFile(filepath, 'r') as zip_ref:
+                            zip_ref.extractall(PROFILE)
+                        self.root.after(0, lambda: self.write_log("Cookies berhasil diimpor!"))
+                        self.root.after(0, self.on_cek)
+                    except Exception as e:
+                        self.root.after(0, lambda: self.write_log(f"ERROR import cookies: {e}"))
+                threading.Thread(target=work, daemon=True).start()
 
-        def work():
-            try:
-                login_manual()
-            except Exception as e:
-                self.root.after(0, lambda: self.write_log(f"ERROR login: {e}"))
-            self.root.after(0, self.on_cek)
-
-        threading.Thread(target=work, daemon=True).start()
+        tk.Label(popup, text="Pilih metode login:").pack(pady=10)
+        tk.Button(popup, text="1. Via Browser", width=20, command=via_browser).pack(pady=2)
+        tk.Button(popup, text="2. Import Cookies (Zip)", width=20, command=via_cookies).pack(pady=2)
 
     def on_install(self):
         self.write_log("Install Chromium (bisa beberapa menit)...")

@@ -24,14 +24,17 @@ schedules.json         # jadwal beli (dibuat runtime)
 profile/                # cookies login (dibuat setelah login)
 ```
 
-## Instalasi
+## Instalasi (Semua OS)
 
 ```bash
-pip install playwright "python-telegram-bot[job-queue]"
-python -m playwright install chromium
+python setup.py
 ```
-
-atau klik tombol `Install Chromium` di GUI.
+Script `setup.py` akan otomatis:
+1. Mendeteksi OS
+2. Install dependency python
+3. Install Chromium browser
+4. Membuat template `.env`
+5. Memberikan opsi integrasi Systemd atau PM2 (untuk latar belakang 24/7)
 
 ## Penggunaan
 
