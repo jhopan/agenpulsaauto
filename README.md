@@ -71,17 +71,15 @@ Edit `shortcuts.json`:
 
 ### Bot Telegram
 
+1. Salin `.env.example` ke `.env`
+2. Isi `.env`:
+```env
+TELEGRAM_TOKEN=123456:ABC-token
+ALLOWED_IDS=123456789
+```
+3. Jalankan bot:
 ```bash
 python tgbot.py
-```
-
-`config.json`:
-
-```json
-{
-  "token": "123456:ABC-token",
-  "allowed_ids": [123456789]
-}
 ```
 
 - `allowed_ids` = whitelist ID Telegram (kosong = semua boleh, tidak disarankan untuk transaksi uang)

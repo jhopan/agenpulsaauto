@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -18,8 +19,14 @@ from telegram.ext import (
 from bot import run_order
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CONFIG = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8"))
-SHORTCUTS = json.load(open(os.path.join(HERE, "shortcuts.json"), encoding="utf-8"))
+load_dotenv(os.path.join(HERE, ".env"))
+
+TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+ALLOWED_IDS = [int(x.strip()) for x in os.getenv("ALLOWED_IDS", "").split(",") if x.strip().isdigit()]
+
+SHORTCUTS = []
+if os.path.exists(os.path.join(HERE, "shortcuts.json")):
+    SHORTCUTS = json.load(open(os.path.join(HERE, "shortcuts.json"), encoding="utf-8"))
 TZ = ZoneInfo("Asia/Jakarta")
 
 CONTACTS_FILE = os.path.join(HERE, "contacts.json")
@@ -47,8 +54,7 @@ def save_schedules():
 
 
 def allowed(update: Update) -> bool:
-    ids = CONFIG.get("allowed_ids") or []
-    return not ids or update.effective_user.id in ids
+    return not ALLOWED_IDS or update.effective_user.id in ALLOWED_IDS
 
 
 def menu_kb():
@@ -472,7 +478,10 @@ def load_schedules(app: Application):
 
 
 def main():
-    app = Application.builder().token(CONFIG["token"]).build()
+    if not TOKEN or "ISI_TOKEN" in TOKEN:
+        print("Error: TELEGRAM_TOKEN belum diatur di .env")
+        return
+    app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

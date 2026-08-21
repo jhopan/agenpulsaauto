@@ -37,6 +37,7 @@ python -m playwright install chromium     # instal browser (jika gagal)
 
 - `playwright` (chromium)
 - `python-telegram-bot[job-queue]` (APScheduler)
+- `python-dotenv`
 
 ## todo
 

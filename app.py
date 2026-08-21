@@ -103,16 +103,18 @@ class App:
             self.bot_proc = None
             self.lbl_bot.config(text="Bot Telegram: mati", fg="black")
             return
-        token_ok = False
-        try:
-            import json
-            cfg = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8"))
-            token_ok = "ISI_TOKEN" not in cfg.get("token", "")
-        except Exception:
-            pass
-        if not token_ok:
-            messagebox.showwarning("AgenPulsa", "Token belum diisi di config.json")
+        
+        # Cek token dari .env
+        import os
+        from dotenv import load_dotenv
+        env_path = os.path.join(HERE, ".env")
+        load_dotenv(env_path)
+        token = os.getenv("TELEGRAM_TOKEN", "")
+        
+        if not token or "ISI_TOKEN" in token:
+            messagebox.showwarning("AgenPulsa", "TELEGRAM_TOKEN belum diisi di file .env")
             return
+            
         self.bot_proc = subprocess.Popen(
             [sys.executable, os.path.join(HERE, "tgbot.py")],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
