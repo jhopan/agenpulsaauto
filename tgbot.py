@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 from datetime import datetime
@@ -17,6 +18,13 @@ from telegram.ext import (
 )
 
 from bot import run_order
+
+# Setup Logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+# Supress httpx logs (terlalu berisik)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(HERE, ".env"))
@@ -563,7 +571,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     load_schedules(app)
-    print(f"Bot jalan. Waktu sekarang WIT: {datetime.now(TZ):%H:%M}. Ctrl+C untuk stop.")
+    print(f"Bot jalan. Waktu sekarang WIB: {datetime.now(TZ):%H:%M}. Ctrl+C untuk stop.")
     app.run_polling()
 
 
