@@ -9,6 +9,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILE = os.path.join(HERE, "profile")
 
 
+def cek_status():
+    with sync_playwright() as p:
+        ctx = p.chromium.launch_persistent_context(PROFILE, headless=True, viewport={"width": 1366, "height": 900})
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        try:
+            page.goto(BASE, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(2000)
+            header = page.locator("header").inner_text()
+            if "Masuk" in header and "Saldo" not in header:
+                return False, "-"
+            saldo = header.replace("Saldo Deposit", "").strip() or "Rp 0"
+            return True, saldo
+        except Exception:
+            return False, "Error"
+        finally:
+            ctx.close()
+
+
 def search_packages(tab, keyword, nomor="081234567890"):
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(PROFILE, headless=True, viewport={"width": 1366, "height": 900})

@@ -17,7 +17,7 @@ from telegram.ext import (
     filters,
 )
 
-from bot import run_order
+from bot import run_order, cek_status
 
 # Setup Logging
 logging.basicConfig(
@@ -73,6 +73,7 @@ def menu_kb():
     rows.append([InlineKeyboardButton("Cari Paket Lain", callback_data="cari")])
     rows.append([InlineKeyboardButton("Tambah Shortcut", callback_data="add_sc")])
     rows.append([InlineKeyboardButton("Jadwal Auto", callback_data="jadwal"), InlineKeyboardButton("Kontak", callback_data="kontak")])
+    rows.append([InlineKeyboardButton("Cek Info Login & Saldo", callback_data="cek_saldo")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -101,7 +102,8 @@ def contact_kb(prefix):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
-    await update.message.reply_text("Halo! Mau beli apa?", reply_markup=menu_kb())
+    welcome_text = "Halo! Mau beli apa?\n\n_Powered by JhopanStore_"
+    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=menu_kb())
 
 
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -138,6 +140,18 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         await q.edit_message_text(f"Tab: {tab}\n\nKirim nomor HP tujuan sebagai pancingan (contoh 081234... untuk Telkomsel, 0877... untuk XL) agar daftar paket muncul:")
 
+    elif data == "cek_saldo":
+        await q.answer()
+        await q.edit_message_text("Mengecek status login dan saldo web, mohon tunggu...")
+        try:
+            login_status, saldo = await asyncio.to_thread(cek_status)
+            if login_status:
+                msg = f"✅ *Status Login:* Terhubung\n💰 *Saldo Saat Ini:* {saldo}\n\n_Powered by JhopanStore_"
+            else:
+                msg = "❌ *Status Login:* Terputus / Sesi Habis\nSilakan jalankan ulang bot.py --login di server.\n\n_Powered by JhopanStore_"
+            await q.edit_message_text(msg, parse_mode="Markdown", reply_markup=menu_kb())
+        except Exception as e:
+            await q.edit_message_text(f"Gagal mengecek saldo: {e}", reply_markup=menu_kb())
     elif data == "cari":
         pending[uid] = {"cari_mode": True}
         await q.answer()
