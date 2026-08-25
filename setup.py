@@ -54,6 +54,100 @@ def main():
         
     print("\n[4/4] Konfigurasi Latar Belakang (Background Service)")
     if os_name == "Linux":
+        cwd = os.getcwd()
+
+        # Pasang menuagenpulsa ke PATH supaya bisa dipanggil dari folder mana saja.
+        menu_src = os.path.join(cwd, "menuagenpulsa")
+        if os.path.exists(menu_src):
+            content = open(menu_src, encoding="utf-8").read()
+            content = content.replace("APP_DIR=${APP_DIR:-/root/agenpulsa}", f"APP_DIR=${{APP_DIR:-{cwd}}}")
+            tmp = os.path.join(cwd, ".menuagenpulsa.tmp")
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                f.write(content)
+            os.chmod(tmp, 0o755)
+            r = subprocess.run(["cp", tmp, "/usr/local/bin/menuagenpulsa"])
+            if r.returncode != 0:
+                subprocess.run(["sudo", "cp", tmp, "/usr/local/bin/menuagenpulsa"])
+            os.remove(tmp)
+            print("menuagenpulsa terpasang ke /usr/local/bin (langsung bisa dipanggil).")
+
+            # Helper login via virtual display (dipakai menuagenpulsa opsi login).
+            login_script = f"""#!/bin/sh
+set -eu
+systemctl stop agenpulsa.service 2>/dev/null || true
+trap "systemctl start agenpulsa.service" EXIT INT TERM
+cd {cwd}
+DISPLAY=:99 {py} bot.py --login
+"""
+            tmp2 = os.path.join(cwd, ".agenpulsa-login.tmp")
+            with open(tmp2, "w", encoding="utf-8", newline="\n") as f:
+                f.write(login_script)
+            os.chmod(tmp2, 0o700)
+            r = subprocess.run(["cp", tmp2, "/usr/local/bin/agenpulsa-login"])
+            if r.returncode != 0:
+                subprocess.run(["sudo", "cp", tmp2, "/usr/local/bin/agenpulsa-login"])
+            os.remove(tmp2)
+
+            # VNC login on-demand (opsi 6 menu) hanya jika stack VNC terpasang.
+            import shutil
+            if all(shutil.which(b) for b in ("Xvfb", "x11vnc", "websockify")):
+                vnc_units = {
+                    "agenpulsa-display.service": """[Unit]
+Description=Virtual display for AgenPulsa login
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1366x900x24 -nolisten tcp
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+""",
+                    "agenpulsa-vnc.service": """[Unit]
+Description=Local VNC for AgenPulsa login
+After=agenpulsa-display.service
+Requires=agenpulsa-display.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/x11vnc -display :99 -rfbauth /root/.vnc/agenpulsa.pass -localhost -forever -shared
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+""",
+                    "agenpulsa-novnc.service": """[Unit]
+Description=Local noVNC for AgenPulsa login
+After=agenpulsa-vnc.service
+Requires=agenpulsa-vnc.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/websockify --web /usr/share/novnc 0.0.0.0:6080 localhost:5900
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+""",
+                }
+                os.makedirs("/root/.vnc", mode=0o700, exist_ok=True)
+                if not os.path.exists("/root/.vnc/agenpulsa.pass"):
+                    subprocess.run("x11vnc -storepasswd agenpulsa /root/.vnc/agenpulsa.pass",
+                                   shell=True, capture_output=True)
+                for name, body in vnc_units.items():
+                    dest = f"/etc/systemd/system/{name}"
+                    if not os.path.exists(dest):
+                        with open(f".{name}.tmp", "w", newline="\n") as f:
+                            f.write(body)
+                        r = subprocess.run(["cp", f".{name}.tmp", dest])
+                        if r.returncode != 0:
+                            subprocess.run(["sudo", "cp", f".{name}.tmp", dest])
+                        os.remove(f".{name}.tmp")
+                subprocess.run("systemctl daemon-reload", shell=True, capture_output=True)
+                print("VNC login on-demand terpasang (tidak auto-start, hanya saat menu login).")
+            else:
+                print("[INFO] Login via VNC butuh: sudo apt install -y xvfb x11vnc novnc websockify")
+
         print("Pilih service manager untuk menjalankan bot non-stop:")
         print("1. Systemd (Default Linux Server, Direkomendasikan)")
         print("2. PM2 (Membutuhkan NodeJS terinstall)")
@@ -62,7 +156,6 @@ def main():
         
         if pil == "1":
             user = os.getenv("USER", "root")
-            cwd = os.getcwd()
             svc = f"""[Unit]
 Description=AgenPulsa Telegram Bot
 After=network.target
@@ -80,13 +173,27 @@ WantedBy=multi-user.target
 """
             with open("agenpulsa.service", "w") as f:
                 f.write(svc)
-            print("\n[INFO] File 'agenpulsa.service' telah dibuat.")
-            print("Untuk mengaktifkannya, jalankan perintah berikut:")
-            print("  sudo cp agenpulsa.service /etc/systemd/system/")
-            print("  sudo systemctl daemon-reload")
-            print("  sudo systemctl enable agenpulsa")
-            print("  sudo systemctl start agenpulsa")
-            print("Cek status: sudo systemctl status agenpulsa")
+            print("[INFO] File 'agenpulsa.service' dibuat. Memasang otomatis...")
+            for c in ("cp agenpulsa.service /etc/systemd/system/agenpulsa.service",
+                      "systemctl daemon-reload",
+                      "systemctl enable agenpulsa"):
+                r = subprocess.run(c, shell=True)
+                if r.returncode != 0:
+                    subprocess.run(f"sudo {c}", shell=True)
+
+            env_token = ""
+            if os.path.exists(".env"):
+                for line in open(".env", encoding="utf-8"):
+                    if line.startswith("TELEGRAM_TOKEN="):
+                        env_token = line.split("=", 1)[1].strip()
+            if env_token and "ISI_TOKEN" not in env_token:
+                r = subprocess.run("systemctl restart agenpulsa", shell=True)
+                if r.returncode != 0:
+                    subprocess.run("sudo systemctl restart agenpulsa", shell=True)
+                subprocess.run("systemctl --no-pager status agenpulsa", shell=True)
+            else:
+                print("\n[INFO] Token bot belum diisi di .env. Setelah diisi, aktifkan dengan:")
+                print("  sudo systemctl start agenpulsa")
             
         elif pil == "2":
             run(f"pm2 start tgbot.py --interpreter {py} --name agenpulsa")
