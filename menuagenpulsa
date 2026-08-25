@@ -86,9 +86,13 @@ login_vnc() {
     ensure_vnc
     systemctl start agenpulsa-display.service agenpulsa-vnc.service agenpulsa-novnc.service
     trap 'systemctl stop agenpulsa-novnc.service agenpulsa-vnc.service agenpulsa-display.service' EXIT INT TERM
+    # Auto-stop VNC setelah 15 menit jika ditinggal (jalan di background).
+    ( sleep 900; systemctl stop agenpulsa-novnc.service agenpulsa-vnc.service agenpulsa-display.service 2>/dev/null ) &
+    vnc_watchdog=$!
+    trap "kill $vnc_watchdog 2>/dev/null; systemctl stop agenpulsa-novnc.service agenpulsa-vnc.service agenpulsa-display.service" EXIT INT TERM
     ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -n 1)
     clear
-    printf '%s\n' 'VNC aktif sementara.'
+    printf '%s\n' 'VNC aktif sementara (auto-stop 15 menit).'
     printf '%s\n' 'Buka browser dari perangkat satu jaringan:'
     printf '%s\n\n' "http://${ip:-IP-SERVER}:6080/vnc.html"
     printf '%s\n\n' 'Masukkan password VNC, lalu login Isipulsa di browser.'

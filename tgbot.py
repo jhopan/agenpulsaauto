@@ -17,7 +17,7 @@ from telegram.ext import (
     filters,
 )
 
-from bot import cek_status, is_maintenance, maintenance_message, run_order
+from bot import cek_status, is_maintenance, maintenance_message, parse_harga, report_orders, run_order
 
 # Setup Logging
 logging.basicConfig(
@@ -74,6 +74,19 @@ def parse_saldo(saldo_str):
     return int(digits) if digits else None
 
 
+async def kirim_error_screenshot(ctx, chat_id, result):
+    """Kirim error.png ke Telegram jika order error (screenshot disimpan bot.py)."""
+    if not result.startswith("ERROR"):
+        return
+    path = os.path.join(HERE, "error.png")
+    if os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                await ctx.bot.send_photo(chat_id, photo=f, caption="Screenshot error order:")
+        except Exception:
+            pass
+
+
 def allowed(update: Update) -> bool:
     return not ALLOWED_IDS or update.effective_user.id in ALLOWED_IDS
 
@@ -87,6 +100,7 @@ def menu_kb():
     rows.append([InlineKeyboardButton("Jadwal Auto", callback_data="jadwal"), InlineKeyboardButton("Kontak", callback_data="kontak")])
     rows.append([InlineKeyboardButton("Cek Info Login & Saldo", callback_data="cek_saldo")])
     rows.append([InlineKeyboardButton("Atur Notif Saldo Menipis", callback_data="set_saldo")])
+    rows.append([InlineKeyboardButton("Laporan Order", callback_data="laporan")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -128,7 +142,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("sc:"):
         sc = SHORTCUTS[int(data.split(":")[1])]
-        pending[uid] = {"tab": sc["tab"], "cari": sc["cari"], "voucher": sc.get("voucher"), "label": sc["label"]}
+        pending[uid] = {"tab": sc["tab"], "cari": sc["cari"], "voucher": sc.get("voucher"), "label": sc["label"], "harga_max": sc.get("harga_max")}
         await q.answer()
         if contacts:
             await q.edit_message_text(f"Paket: {sc['label']}\nPilih nomor tujuan:", reply_markup=contact_kb("nomor"))
@@ -165,6 +179,22 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(msg, parse_mode="Markdown", reply_markup=menu_kb())
         except Exception as e:
             await q.edit_message_text(f"Gagal mengecek saldo: {e}", reply_markup=menu_kb())
+    elif data == "laporan":
+        await q.answer()
+        rows = [
+            [InlineKeyboardButton("Harian", callback_data="lap:harian")],
+            [InlineKeyboardButton("Mingguan (7 hari)", callback_data="lap:mingguan")],
+            [InlineKeyboardButton("Bulanan (30 hari)", callback_data="lap:bulanan")],
+        ]
+        await q.edit_message_text("Pilih periode laporan:", reply_markup=InlineKeyboardMarkup(rows))
+
+    elif data.startswith("lap:"):
+        period = data.split(":", 1)[1]
+        await q.answer()
+        await q.edit_message_text("Menyusun laporan...")
+        teks = await asyncio.to_thread(report_orders, period)
+        await q.edit_message_text(teks, reply_markup=menu_kb())
+
     elif data == "set_saldo":
         pending[uid] = {"mode": "set_saldo_threshold"}
         await q.answer()
@@ -205,9 +235,11 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         await q.answer()
         await q.edit_message_text("Memproses order, tunggu...")
-        result = await asyncio.to_thread(run_order, job["nomor"], job["tab"], cari=job.get("cari"), voucher=job.get("voucher"))
+        result = await asyncio.to_thread(run_order, job["nomor"], job["tab"], cari=job.get("cari"), voucher=job.get("voucher"),
+                                         label=job.get("label"), harga_max=job.get("harga_max"))
         pending.pop(uid, None)
         await ctx.bot.send_message(uid, result)
+        await kirim_error_screenshot(ctx, uid, result)
 
     elif data == "batal":
         pending.pop(uid, None)
@@ -236,7 +268,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("js:"):
         sc = SHORTCUTS[int(data.split(":")[1])]
-        job = {"mode": "jadwal_kontak", "tab": sc["tab"], "cari": sc["cari"], "voucher": sc.get("voucher"), "label": sc["label"]}
+        job = {"mode": "jadwal_kontak", "tab": sc["tab"], "cari": sc["cari"], "voucher": sc.get("voucher"), "label": sc["label"], "harga_max": sc.get("harga_max")}
         pending[uid] = job
         await q.answer()
         if contacts:
@@ -366,7 +398,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "label": label,
                 "tab": tab,
                 "cari": cari,
-                "voucher": voucher
+                "voucher": voucher,
+                "harga_max": parse_harga(paket.get("harga", ""))
             })
             save_shortcuts()
             pending.pop(uid, None)
@@ -440,6 +473,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "tab": job["tab"],
             "cari": job["cari"],
             "voucher": job.get("voucher"),
+            "harga_max": job.get("harga_max"),
             "nomor": job["nomor"],
             "jam": f"{jam:02d}:{menit:02d}",
             "chat_id": uid,
@@ -496,6 +530,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "tab": job["tab"],
             "cari": job["cari"],
             "voucher": job.get("voucher"),
+            "harga_max": job.get("harga_max"),
             "nomor": job["nomor"],
             "jam": run_at.strftime("%d/%m/%Y %H:%M"),
             "chat_id": uid,
@@ -528,6 +563,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "tab": job["tab"],
             "cari": job["cari"],
             "voucher": job.get("voucher"),
+            "harga_max": job.get("harga_max"),
             "nomor": job["nomor"],
             "jam": f"{jam:02d}:{menit:02d}",
             "interval_hari": n_hari,
@@ -586,8 +622,10 @@ async def scheduled_order(ctx: ContextTypes.DEFAULT_TYPE):
         sched["terakhir_jalan"] = sekarang.strftime("%Y%m%d")
         save_schedules()
     
-    result = await asyncio.to_thread(run_order, sched["nomor"], sched["tab"], cari=sched.get("cari"), voucher=sched.get("voucher"))
+    result = await asyncio.to_thread(run_order, sched["nomor"], sched["tab"], cari=sched.get("cari"), voucher=sched.get("voucher"),
+                                     label=sched.get("label"), harga_max=sched.get("harga_max"))
     await ctx.bot.send_message(sched["chat_id"], f"[JADWAL {sched['jam']} WIB] {sched['label']}\n{result}")
+    await kirim_error_screenshot(ctx, sched["chat_id"], result)
 
     if tipe == "sekali":
         for i, s in enumerate(schedules):
@@ -637,6 +675,25 @@ async def check_saldo_alert(ctx: ContextTypes.DEFAULT_TYPE):
         save_settings()
 
 
+async def daily_report(ctx: ContextTypes.DEFAULT_TYPE):
+    """Kirim laporan harian otomatis tiap malam."""
+    if os.path.exists(SETTINGS_FILE):
+        global settings
+        try:
+            settings = json.load(open(SETTINGS_FILE, encoding="utf-8"))
+        except Exception:
+            pass
+    if not settings.get("laporan_harian", True):
+        return
+    targets = [settings["alert_chat"]] if settings.get("alert_chat") else (ALLOWED_IDS or [])
+    teks = await asyncio.to_thread(report_orders, "harian")
+    for uid in targets:
+        try:
+            await ctx.bot.send_message(uid, teks)
+        except Exception:
+            pass
+
+
 def load_schedules(app: Application):
     for sched in schedules:
         tipe = sched.get("tipe", "harian")
@@ -675,6 +732,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     load_schedules(app)
     app.job_queue.run_repeating(check_saldo_alert, interval=6 * 3600, first=60, name="saldo_alert")
+    app.job_queue.run_daily(daily_report, time=datetime(2000, 1, 1, 21, 0, tzinfo=TZ), name="laporan_harian")
     print(f"Bot jalan. Waktu sekarang WIB: {datetime.now(TZ):%H:%M}. Ctrl+C untuk stop.")
     app.run_polling()
 

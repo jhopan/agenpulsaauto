@@ -1,7 +1,8 @@
 import argparse
 import json
 import os
-from datetime import datetime, time
+import re
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from playwright.sync_api import sync_playwright
@@ -22,6 +23,77 @@ def is_maintenance(now=None):
 
 def maintenance_message():
     return "ORDER DIBATALKAN: transaksi ditutup untuk rekap dan pembukuan pukul 23:40-00:35 WIB. Silakan ulangi setelah 00:35 WIB."
+
+
+ORDERS_FILE = os.path.join(HERE, "orders.json")
+
+
+def parse_harga(teks):
+    """'Rp 13.749' -> 13749. Return 0 jika gagal."""
+    digits = re.sub(r"[^\d]", "", teks or "")
+    return int(digits) if digits else 0
+
+
+def log_order(label, nomor, hasil, harga=0, order_id=None):
+    """Append satu entri riwayat order ke orders.json."""
+    entry = {
+        "waktu": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        "label": label or "-",
+        "nomor": nomor,
+        "harga": harga,
+        "order_id": order_id,
+        "sukses": hasil.startswith("ORDER SUKSES"),
+        "hasil": hasil[:300],
+    }
+    try:
+        orders = json.load(open(ORDERS_FILE, encoding="utf-8")) if os.path.exists(ORDERS_FILE) else []
+    except Exception:
+        orders = []
+    orders.append(entry)
+    # Simpan maksimal 2000 entri terakhir.
+    json.dump(orders[-2000:], open(ORDERS_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    return entry
+
+
+def report_orders(period="harian"):
+    """Ringkasan order: harian (hari ini), mingguan (7 hari), bulanan (30 hari)."""
+    try:
+        orders = json.load(open(ORDERS_FILE, encoding="utf-8")) if os.path.exists(ORDERS_FILE) else []
+    except Exception:
+        orders = []
+    now = datetime.now(TZ)
+    if period == "harian":
+        awal = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        judul = f"LAPORAN HARIAN {now:%d/%m/%Y}"
+    elif period == "mingguan":
+        awal = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+        judul = f"LAPORAN MINGGUAN (7 hari sampai {now:%d/%m/%Y})"
+    else:
+        awal = (now - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0)
+        judul = f"LAPORAN BULANAN (30 hari sampai {now:%d/%m/%Y})"
+    rows = []
+    for o in orders:
+        try:
+            t = datetime.strptime(o["waktu"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+        except Exception:
+            continue
+        if t >= awal:
+            rows.append(o)
+    sukses = [r for r in rows if r["sukses"]]
+    gagal = [r for r in rows if not r["sukses"]]
+    total = sum(r.get("harga", 0) for r in sukses)
+    lines = [judul, f"Order sukses: {len(sukses)} | Gagal: {len(gagal)}", f"Total keluar: Rp {total:,}".replace(",", ".")]
+    if sukses:
+        lines.append("\nSukses:")
+        for r in sukses[-10:]:
+            lines.append(f"- {r['waktu'][11:16]} {r['label']} Rp {r.get('harga', 0):,}".replace(",", "."))
+    if gagal:
+        lines.append("\nGagal:")
+        for r in gagal[-5:]:
+            lines.append(f"- {r['waktu'][11:16]} {r['label']}: {r['hasil'][:80]}")
+    if not rows:
+        lines.append("\nBelum ada order pada periode ini.")
+    return "\n".join(lines)
 
 
 def cek_status():
@@ -69,10 +141,19 @@ def search_packages(tab, keyword, nomor="081234567890"):
             ctx.close()
 
 
-def run_order(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False):
+def run_order(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False, label=None, harga_max=None):
     if is_maintenance():
         return maintenance_message()
+    hasil = _run_order_impl(nomor, tab, cari=cari, voucher=voucher, dry_run=dry_run, headed=headed, harga_max=harga_max)
+    if not dry_run:
+        m = re.search(r"ID: (\d+)", hasil)
+        log_order(label or cari or voucher or tab, nomor, hasil,
+                  harga=parse_harga(re.search(r"Harga: (Rp[\d.]+)", hasil).group(1)) if re.search(r"Harga: (Rp[\d.]+)", hasil) else 0,
+                  order_id=m.group(1) if m else None)
+    return hasil
 
+
+def _run_order_impl(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False, harga_max=None):
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
             PROFILE,
@@ -112,6 +193,13 @@ def run_order(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False):
             page.select_option("#pilihpembayaran", "balance")
             nama_paket = " ".join((target.inner_text() or "").split())
             harga = page.inner_text("#harga h3")
+
+            # Guard perubahan harga: batalkan jika harga sekarang melebihi batas yang disimpan.
+            if harga_max:
+                harga_now = parse_harga(harga)
+                if harga_now > harga_max:
+                    return (f"ORDER DIBATALKAN: harga naik. Sekarang {harga}, batas tersimpan "
+                            f"Rp {harga_max:,}. Perbarui shortcut jika harga baru wajar.".replace(",", "."))
 
             if dry_run:
                 return f"DRY RUN OK. Paket: {nama_paket} | Harga: {harga}"
