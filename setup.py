@@ -36,14 +36,24 @@ def main():
         run(f'"{py}" -m playwright install chromium')
     
     print("\n[3/4] Menyiapkan File Konfigurasi...")
-    if not os.path.exists(".env"):
-        token = input("Masukkan Token Bot Telegram (dari BotFather): ").strip()
-        allowed = input("Masukkan ID Telegram yang diizinkan (pisahkan koma, kosong = semua): ").strip()
-        with open(".env", "w") as f:
-            f.write(f"TELEGRAM_TOKEN={token or 'ISI_TOKEN_BOT_DISINI'}\nALLOWED_IDS={allowed}\n")
-        print("File .env berhasil dibuat.")
-    else:
-        print("File .env sudah ada, dilewati.")
+    # Selalu tanya token + ID, nilai lama jadi default (enter = pakai yang lama).
+    old_token, old_ids = "", ""
+    if os.path.exists(".env"):
+        for line in open(".env", encoding="utf-8"):
+            if line.startswith("TELEGRAM_TOKEN="):
+                old_token = line.split("=", 1)[1].strip()
+            elif line.startswith("ALLOWED_IDS="):
+                old_ids = line.split("=", 1)[1].strip()
+    if "ISI_TOKEN" in old_token:
+        old_token = ""
+
+    hint_t = f" [{old_token[:8]}...]" if old_token else ""
+    hint_i = f" [{old_ids}]" if old_ids else ""
+    token = input(f"Masukkan Token Bot Telegram (dari BotFather){hint_t}: ").strip() or old_token
+    allowed = input(f"Masukkan ID Telegram yang diizinkan (pisahkan koma, kosong = semua){hint_i}: ").strip() or old_ids
+    with open(".env", "w") as f:
+        f.write(f"TELEGRAM_TOKEN={token or 'ISI_TOKEN_BOT_DISINI'}\nALLOWED_IDS={allowed}\n")
+    print("File .env berhasil disimpan.")
         
     if not os.path.exists("shortcuts.json"):
         with open("shortcuts.json", "w") as f:
