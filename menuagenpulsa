@@ -136,6 +136,7 @@ menu() {
         printf ' [6] Login Isipulsa via VNC (sementara)\n'
         printf ' [7] Backup aplikasi + cookie\n'
         printf ' [8] Inject cookies dari file JSON (Cookie-Editor)\n'
+        printf ' [9] Atur batas saldo menipis (notif Telegram)\n'
         printf ' [0] Keluar\n\n'
         printf ' Pilih: '
         read -r choice || exit 0
@@ -149,6 +150,13 @@ menu() {
             7) printf '\nBackup: %s\n' "$(backup)"; pause ;;
             8) printf '\nPath file JSON cookies (export Cookie-Editor): '; read -r cfile || exit 0
                if [ -z "$cfile" ]; then printf 'Dibatalkan.\n'; else (cd "$APP_DIR" && "$PYTHON" -c "import sys; from bot import import_cookies; print(import_cookies(sys.argv[1]))" "$cfile"); fi; pause ;;
+            9) cur=$(cd "$APP_DIR" && "$PYTHON" -c "import json,os; s=json.load(open('settings.json')) if os.path.exists('settings.json') else {}; print(s.get('saldo_min',0))")
+               printf '\nBatas saldo menipis saat ini: %s (0 = nonaktif)\n' "$cur"
+               printf 'Batas baru (rupiah, 0 = nonaktif): '; read -r nilai || exit 0
+               case "$nilai" in ''|*[!0-9]*) printf 'Harus angka.\n' ;;
+               *) (cd "$APP_DIR" && "$PYTHON" -c "import json,os; p='settings.json'; s=json.load(open(p)) if os.path.exists(p) else {}; s['saldo_min']=int('$nilai'); s['saldo_notified']=False; json.dump(s,open(p,'w'),indent=2); print('Tersimpan.')")
+                  systemctl restart "$SERVICE" && printf 'Bot direstart agar setting aktif.\n';;
+               esac; pause ;;
             0) clear; exit 0 ;;
             *) printf '\nPilihan tidak ada.\n'; pause ;;
         esac

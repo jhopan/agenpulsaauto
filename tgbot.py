@@ -39,9 +39,11 @@ TZ = ZoneInfo("Asia/Jakarta")
 
 CONTACTS_FILE = os.path.join(HERE, "contacts.json")
 SCHEDULES_FILE = os.path.join(HERE, "schedules.json")
+SETTINGS_FILE = os.path.join(HERE, "settings.json")
 
 contacts = json.load(open(CONTACTS_FILE, encoding="utf-8")) if os.path.exists(CONTACTS_FILE) else {}
 schedules = json.load(open(SCHEDULES_FILE, encoding="utf-8")) if os.path.exists(SCHEDULES_FILE) else []
+settings = json.load(open(SETTINGS_FILE, encoding="utf-8")) if os.path.exists(SETTINGS_FILE) else {}
 
 pending = {}
 
@@ -62,6 +64,16 @@ def save_shortcuts():
     json.dump(SHORTCUTS, open(os.path.join(HERE, "shortcuts.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
 
+def save_settings():
+    json.dump(settings, open(SETTINGS_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+
+def parse_saldo(saldo_str):
+    """'Rp 17.233' -> 17233. Return None jika gagal."""
+    digits = re.sub(r"[^\d]", "", saldo_str or "")
+    return int(digits) if digits else None
+
+
 def allowed(update: Update) -> bool:
     return not ALLOWED_IDS or update.effective_user.id in ALLOWED_IDS
 
@@ -74,6 +86,7 @@ def menu_kb():
     rows.append([InlineKeyboardButton("Tambah Shortcut", callback_data="add_sc")])
     rows.append([InlineKeyboardButton("Jadwal Auto", callback_data="jadwal"), InlineKeyboardButton("Kontak", callback_data="kontak")])
     rows.append([InlineKeyboardButton("Cek Info Login & Saldo", callback_data="cek_saldo")])
+    rows.append([InlineKeyboardButton("Atur Notif Saldo Menipis", callback_data="set_saldo")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -152,6 +165,15 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(msg, parse_mode="Markdown", reply_markup=menu_kb())
         except Exception as e:
             await q.edit_message_text(f"Gagal mengecek saldo: {e}", reply_markup=menu_kb())
+    elif data == "set_saldo":
+        pending[uid] = {"mode": "set_saldo_threshold"}
+        await q.answer()
+        current = settings.get("saldo_min", 0)
+        await q.edit_message_text(
+            f"Notifikasi saldo menipis saat ini: {'Rp ' + format(current, ',').replace(',', '.') if current else 'nonaktif'}\n\n"
+            "Kirim batas saldo minimum dalam rupiah (contoh: 20000).\nKirim 0 untuk menonaktifkan."
+        )
+
     elif data == "cari":
         pending[uid] = {"cari_mode": True}
         await q.answer()
@@ -283,6 +305,26 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     mode = job.get("mode")
+
+    if mode == "set_saldo_threshold":
+        digits = re.sub(r"[^\d]", "", text)
+        if not digits:
+            await update.message.reply_text("Kirim angka dalam rupiah, contoh: 20000 (atau 0 untuk nonaktif):")
+            return
+        nilai = int(digits)
+        settings["saldo_min"] = nilai
+        settings["saldo_notified"] = False
+        settings["alert_chat"] = uid
+        save_settings()
+        pending.pop(uid, None)
+        if nilai:
+            await update.message.reply_text(
+                f"Notifikasi saldo menipis aktif.\nBatas: Rp {format(nilai, ',').replace(',', '.')}\nBot akan cek tiap 6 jam dan kirim peringatan.",
+                reply_markup=menu_kb(),
+            )
+        else:
+            await update.message.reply_text("Notifikasi saldo menipis dinonaktifkan.", reply_markup=menu_kb())
+        return
 
     if mode == "add_sc_nomor":
         nomor = text.replace("-", "").replace(" ", "")
@@ -555,6 +597,46 @@ async def scheduled_order(ctx: ContextTypes.DEFAULT_TYPE):
                 break
 
 
+async def check_saldo_alert(ctx: ContextTypes.DEFAULT_TYPE):
+    """Cek saldo periodik. Kirim notifikasi ke semua allowed user jika di bawah batas."""
+    # Baca ulang settings dari disk supaya perubahan via menu Telegram langsung aktif.
+    global settings
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            settings = json.load(open(SETTINGS_FILE, encoding="utf-8"))
+        except Exception:
+            pass
+    batas = settings.get("saldo_min", 0)
+    if not batas:
+        return
+    try:
+        login_ok, saldo_str = await asyncio.to_thread(cek_status)
+    except Exception:
+        return
+    targets = [settings["alert_chat"]] if settings.get("alert_chat") else (ALLOWED_IDS or [])
+    if not login_ok:
+        if not settings.get("login_notified"):
+            settings["login_notified"] = True
+            save_settings()
+            for uid in targets:
+                await ctx.bot.send_message(uid, "⚠️ Login isipulsa HABIS. Jalankan login ulang di server (menuagenpulsa opsi 6).")
+        return
+    if settings.get("login_notified"):
+        settings["login_notified"] = False
+        save_settings()
+    nilai = parse_saldo(saldo_str)
+    if nilai is None:
+        return
+    if nilai < batas and not settings.get("saldo_notified"):
+        settings["saldo_notified"] = True
+        save_settings()
+        for uid in targets:
+            await ctx.bot.send_message(uid, f"⚠️ SALDO MENIPIS!\nSaldo: {saldo_str}\nBatas: Rp {format(batas, ',').replace(',', '.')}\nSegera top up agar order tidak gagal.")
+    elif nilai >= batas and settings.get("saldo_notified"):
+        settings["saldo_notified"] = False
+        save_settings()
+
+
 def load_schedules(app: Application):
     for sched in schedules:
         tipe = sched.get("tipe", "harian")
@@ -592,6 +674,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     load_schedules(app)
+    app.job_queue.run_repeating(check_saldo_alert, interval=6 * 3600, first=60, name="saldo_alert")
     print(f"Bot jalan. Waktu sekarang WIB: {datetime.now(TZ):%H:%M}. Ctrl+C untuk stop.")
     app.run_polling()
 
