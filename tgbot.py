@@ -17,7 +17,7 @@ from telegram.ext import (
     filters,
 )
 
-from bot import run_order, cek_status
+from bot import cek_status, is_maintenance, maintenance_message, run_order
 
 # Setup Logging
 logging.basicConfig(
@@ -204,7 +204,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for i, s in enumerate(schedules):
             rows.append([InlineKeyboardButton(f"Hapus: {s['label']} {s['jam']}", callback_data=f"del:{i}")])
         daftar = "\n".join(f"- {s['label']} | {s['nomor']} | {s['jam']} WIB ({s.get('tipe', 'harian')})" for s in schedules) or "(kosong)"
-        await q.edit_message_text(f"Jadwal auto (tiap hari, WIT):\n{daftar}", reply_markup=InlineKeyboardMarkup(rows))
+        await q.edit_message_text(f"Jadwal auto (tiap hari, WIB):\n{daftar}", reply_markup=InlineKeyboardMarkup(rows))
 
     elif data == "jadwal_baru":
         pending[uid] = {"mode": "jadwal_paket"}
@@ -522,6 +522,13 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def scheduled_order(ctx: ContextTypes.DEFAULT_TYPE):
     sched = ctx.job.data
     tipe = sched.get("tipe", "harian")
+
+    if is_maintenance():
+        if tipe == "sekali":
+            schedules[:] = [s for s in schedules if s["id"] != sched["id"]]
+            save_schedules()
+        await ctx.bot.send_message(sched["chat_id"], f"[JADWAL {sched['jam']} WIB] {sched['label']}\n{maintenance_message()}")
+        return
     
     if tipe == "interval":
         sekarang = datetime.now(TZ)

@@ -1,12 +1,27 @@
 import argparse
 import json
 import os
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import sync_playwright
 
 BASE = "https://isipulsa.web.id/"
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILE = os.path.join(HERE, "profile")
+TZ = ZoneInfo("Asia/Jakarta")
+MAINTENANCE_START = time(23, 40)
+MAINTENANCE_END = time(0, 35)
+
+
+def is_maintenance(now=None):
+    now = now or datetime.now(TZ)
+    current = now.astimezone(TZ).time().replace(tzinfo=None)
+    return current >= MAINTENANCE_START or current < MAINTENANCE_END
+
+
+def maintenance_message():
+    return "ORDER DIBATALKAN: transaksi ditutup untuk rekap dan pembukuan pukul 23:40-00:35 WIB. Silakan ulangi setelah 00:35 WIB."
 
 
 def cek_status():
@@ -55,6 +70,9 @@ def search_packages(tab, keyword, nomor="081234567890"):
 
 
 def run_order(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False):
+    if is_maintenance():
+        return maintenance_message()
+
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
             PROFILE,

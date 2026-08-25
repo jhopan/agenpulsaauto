@@ -4,64 +4,92 @@ Bot otomatisasi pembelian pulsa/paket kuota dari [isipulsa.web.id](https://isipu
 
 ## Fitur
 
-- **Cari paket** berdasarkan kata kunci atau ID voucher
-- **Beli paket** via command line, dashboard GUI, atau bot Telegram
-- **Shortcut paket** (label tombol + ID voucher presisi)
-- **Simpan kontak** nomor HP customer
-- **Jadwal auto** beli paket tiap hari jam tertentu (WIB)
-- **GUI dashboard** (login, cek saldo, cek Telegram, instalasi Chromium)
+- Cari paket berdasarkan kata kunci atau ID voucher.
+- Beli paket via command line, GUI Windows, atau bot Telegram.
+- Shortcut paket, kontak pelanggan, dan jadwal auto harian, sekali, atau interval.
+- Cek status login dan saldo deposit.
+- Semua jadwal memakai zona waktu WIB (`Asia/Jakarta`).
+- Transaksi manual dan auto dibatalkan pada 23:40-00:35 WIB untuk rekap situs.
+- Dashboard terminal Linux: status, log, backup, dan login ulang via VNC sementara.
 
 ## Struktur
 
 ```
-app.py                  # GUI dashboard (tkinter)
-bot.py                  # engine order (playwright)
-tgbot.py                # bot Telegram (python-telegram-bot)
+app.py                  # GUI dashboard tkinter (Windows)
+bot.py                  # engine order Playwright
+menuagenpulsa           # dashboard terminal Linux
+menuagenpulsa.bat       # launcher GUI Windows
+tgbot.py                # bot Telegram
 shortcuts.json          # daftar shortcut paket
-config.json             # token bot + whitelist user
-contacts.json           # kontak tersimpan (dibuat runtime)
-schedules.json         # jadwal beli (dibuat runtime)
-profile/                # cookies login (dibuat setelah login)
+contacts.json           # kontak runtime (dibuat otomatis)
+schedules.json          # jadwal runtime (dibuat otomatis)
+profile/                # profile/cookie browser setelah login
 ```
 
-## Instalasi (Semua OS)
+## Instalasi lokal
 
 ```bash
 python setup.py
 ```
-Script `setup.py` akan otomatis:
-1. Mendeteksi OS
-2. Install dependency python
-3. Install Chromium browser
-4. Membuat template `.env`
-5. Memberikan opsi integrasi Systemd atau PM2 (untuk latar belakang 24/7)
 
-## Penggunaan
+Script memasang dependency dari `requirements.txt`, Chromium Playwright, dan membuat `.env` bila belum ada.
 
-### Login
+Atau manual:
+
+```bash
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+Buat `.env` dari `.env.example`, lalu isi:
+
+```env
+TELEGRAM_TOKEN=isi_token_bot
+ALLOWED_IDS=123456789
+```
+
+`ALLOWED_IDS` menerima ID Telegram dipisah koma. Kosong berarti semua user bisa memakai bot.
+
+## Penggunaan command line
 
 ```bash
 python bot.py --login
-```
-
-Ketik `menuagenpulsa` (via .bat file) atau `python app.py`, klik Login.
-
-### Cari paket
-
-```bash
-python -c "from bot import search_packages; print(search_packages('Paket Kuota', 'ilmupedia'))"
-```
-
-### Beli paket
-
-```bash
-python bot.py --nomor 081234567890 --tab "Paket Kuota" --cari "Ilmupedia 22GB"
+python bot.py --logout
+python bot.py --import-zip <file.zip>
+python bot.py --nomor 081234567890 --tab "Paket Kuota" --cari "Ilmupedia 22GB" --dry-run
 python bot.py --nomor 081234567890 --tab "Paket Kuota" --voucher 10137
+python tgbot.py
 ```
 
-### Shortcut paket
+- `--voucher` lebih presisi; `--cari` menjadi fallback pencocokan teks.
+- `--dry-run` memilih paket dan menampilkan harga tanpa submit order.
+- Saat error order, screenshot disimpan ke `error.png`.
 
-Edit `shortcuts.json`:
+## Windows GUI
+
+```bat
+menuagenpulsa.bat
+```
+
+Atau:
+
+```bash
+python app.py
+```
+
+GUI mendukung cek login/saldo, login browser, import cookie ZIP, logout, instal Chromium, dan start/stop bot Telegram.
+
+## Bot Telegram
+
+Jalankan:
+
+```bash
+python tgbot.py
+```
+
+Alur: `/start` → pilih shortcut/cari paket → pilih nomor → konfirmasi → order.
+
+Shortcut disimpan di `shortcuts.json`:
 
 ```json
 [
@@ -69,43 +97,44 @@ Edit `shortcuts.json`:
 ]
 ```
 
-- `voucher` = ID unik paket (`data-voucher` di situs), lebih presisi
-- `cari` = kata kunci fallback kalau voucher ID tidak ketemu
+## Jadwal auto
 
-### Bot Telegram
+Menu **Jadwal Auto** mendukung:
 
-1. Salin `.env.example` ke `.env`
-2. Isi `.env`:
-```env
-TELEGRAM_TOKEN=123456:ABC-token
-ALLOWED_IDS=123456789
-```
-3. Jalankan bot:
+1. **Tiap hari** — `HH:MM`
+2. **Sekali** — `DD/MM HH:MM` atau `DD/MM/YYYY HH:MM`
+3. **Interval N hari** — `N HH:MM`, contoh `7 00:00`
+
+Semua input dan notifikasi jadwal adalah WIB. Jadwal sekali yang terlewat saat bot mati tidak dijalankan saat startup. Jadwal sekali yang jatuh pada 23:40-00:35 WIB dibatalkan dan dihapus; jadwal harian/interval tetap ada untuk hari berikutnya.
+
+## Server Linux
+
+Instalasi server saat ini berada di `/root/agenpulsa` dan dijalankan oleh `agenpulsa.service`.
+
 ```bash
-python tgbot.py
+menuagenpulsa
+menuagenpulsa status
+menuagenpulsa logs 100
+menuagenpulsa backup
 ```
 
-- `allowed_ids` = whitelist ID Telegram (kosong = semua boleh, tidak disarankan untuk transaksi uang)
-- Alur: `/start` → klik shortcut/nama paket → pilih nomor → konfirmasi → order
+Dashboard terminal menyediakan start/stop/restart bot, log, cek login/saldo, backup, dan login ulang.
 
-### Jadwal auto
+Pilih **Login Isipulsa via VNC**. Menu menyalakan VNC/noVNC sementara lalu menampilkan URL `http://IP-SERVER:6080/vnc.html`. Buka URL itu dari perangkat satu jaringan, login Isipulsa, lalu tekan Enter di terminal. VNC otomatis mati dan bot Telegram start kembali.
 
-Jadwal tersimpan di `schedules.json`. Bot mendukung 3 tipe jadwal (zona waktu WIB):
-1. **Tiap hari**: kirim jam (format `HH:MM`)
-2. **Sekali**: kirim tanggal dan jam (format `DD/MM 00:00` atau `DD/MM/YYYY 00:00`). Jadwal akan otomatis dihapus setelah jalan.
-3. **Interval N Hari**: kirim jumlah hari dan jam (format `N HH:MM`, contoh `7 00:00` untuk beli tiap 7 hari jam 00:00). Sangat cocok untuk memperpanjang paket mingguan/bulanan otomatis.
+Backup dibuat ke:
 
-Untuk melihat atau menghapus jadwal aktif, klik menu **Jadwal Auto**. Catatan: Bot harus tetap berjalan. Jika komputer mati dan jadwal "sekali" terlewat, jadwal tersebut tidak akan dieksekusi saat bot nyala kembali.
+```text
+/root/agenpulsa-backups/agenpulsa-YYYY-MM-DD-HHMMSS.tar.gz
+```
 
-## Flow order di situs
+## Flow order dan catatan
 
-1. Buka isipulsa.web.id (pakai cookies login di `profile/`)
-2. Klik tab produk → isi nomor HP → situs load daftar paket
-3. Klik paket (`data-voucher` atau teks search) → pilih saldo
-4. Submit via jQuery AJAX → `.success` true (redirect history) / false (errors)
+1. Browser memakai cookie di `profile/`.
+2. Isi nomor HP agar situs memuat daftar paket.
+3. Paket dipilih lewat `data-voucher` atau teks pencarian.
+4. Order dikirim dengan jQuery AJAX (`$.post`), bukan `form.submit()` atau `page.click('#submit')`.
 
-## Catatan
-
-- Akun harus terverifikasi (email + no HP) sebelum bisa order
-- Saldo harus cukup, server tolak kalau kurang
-- Sesi login bisa kadaluarsa, bot deteksi dan minta re-login (`python bot.py --login`)
+- Akun isipulsa wajib terverifikasi email dan nomor HP.
+- Saldo deposit harus cukup.
+- Sesi login dapat habis; login ulang dari `python bot.py --login` atau menu VNC server.

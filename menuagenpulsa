@@ -1,3 +1,98 @@
 #!/bin/sh
-cd "$(dirname "$0")"
-python3 app.py 2>/dev/null || python app.py
+# Linux server dashboard. Windows uses menuagenpulsa.bat for Tkinter GUI.
+set -eu
+
+APP_DIR=${APP_DIR:-/root/agenpulsa}
+SERVICE=agenpulsa.service
+BACKUP_DIR=${BACKUP_DIR:-/root/agenpulsa-backups}
+PYTHON="$APP_DIR/.venv/bin/python"
+
+need_server() {
+    [ -x "$PYTHON" ] || { printf '%s\n' "Server install tidak ditemukan: $APP_DIR" >&2; exit 1; }
+}
+
+login_status() {
+    "$PYTHON" -c 'from bot import cek_status; ok, saldo = cek_status(); print(("AKTIF" if ok else "HABIS") + "|" + saldo)' 2>/dev/null || printf '%s' 'CEK GAGAL|-'
+}
+
+backup() {
+    install -d -m 700 "$BACKUP_DIR"
+    file="$BACKUP_DIR/agenpulsa-$(date +%F-%H%M%S).tar.gz"
+    tar -C "$(dirname "$APP_DIR")" -czf "$file" "$(basename "$APP_DIR")"
+    printf '%s\n' "$file"
+}
+
+logs() { journalctl -u "$SERVICE" -n "${1:-50}" --no-pager; }
+
+login_vnc() {
+    systemctl start agenpulsa-display.service agenpulsa-vnc.service agenpulsa-novnc.service
+    trap 'systemctl stop agenpulsa-novnc.service agenpulsa-vnc.service agenpulsa-display.service' EXIT INT TERM
+    ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -n 1)
+    clear
+    printf '%s\n' 'VNC aktif sementara.'
+    printf '%s\n' 'Buka browser dari perangkat satu jaringan:'
+    printf '%s\n\n' "http://${ip:-IP-SERVER}:6080/vnc.html"
+    printf '%s\n\n' 'Masukkan password VNC, lalu login Isipulsa di browser.'
+    /usr/local/bin/agenpulsa-login
+}
+
+usage() {
+    printf '%s\n' 'Pakai: menuagenpulsa [status|start|stop|restart|logs [jumlah]|login|backup]'
+}
+
+run_action() {
+    case "$1" in
+        status) systemctl --no-pager status "$SERVICE" ;;
+        start|stop|restart) systemctl "$1" "$SERVICE"; systemctl is-active "$SERVICE" ;;
+        logs) logs "${2:-50}" ;;
+        login) login_vnc ;;
+        backup) backup ;;
+        *) usage; exit 2 ;;
+    esac
+}
+
+pause() { printf '\nTekan Enter...'; read -r _; }
+
+menu() {
+    while :; do
+        clear
+        status=$(login_status)
+        login=${status%%|*}
+        saldo=${status#*|}
+        bot=$(systemctl is-active "$SERVICE" 2>/dev/null || true)
+        now=$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')
+        printf '\033[1;32m╔══════════════════════════════════════════════╗\033[0m\n'
+        printf '\033[1;32m║              A G E N  P U L S A               ║\033[0m\n'
+        printf '\033[1;32m╚══════════════════════════════════════════════╝\033[0m\n'
+        printf ' Waktu : %s\n' "$now"
+        printf ' Bot   : %s\n' "$bot"
+        printf ' Login : %s\n' "$login"
+        printf ' Saldo : %s\n' "$(printf '%s' "$saldo" | tr '_' ' ')"
+        printf '\n'
+        printf ' [1] Cek login dan saldo\n'
+        printf ' [2] Start bot Telegram\n'
+        printf ' [3] Stop bot Telegram\n'
+        printf ' [4] Restart bot Telegram\n'
+        printf ' [5] Lihat log bot\n'
+        printf ' [6] Login Isipulsa via VNC (sementara)\n'
+        printf ' [7] Backup aplikasi + cookie\n'
+        printf ' [0] Keluar\n\n'
+        printf ' Pilih: '
+        read -r choice || exit 0
+        case "$choice" in
+            1) printf '\nLogin: %s\n' "$(login_status | tr '|' ' ')"; pause ;;
+            2) systemctl start "$SERVICE"; printf '\nBot: %s\n' "$(systemctl is-active "$SERVICE")"; pause ;;
+            3) systemctl stop "$SERVICE"; printf '\nBot: %s\n' "$(systemctl is-active "$SERVICE" || true)"; pause ;;
+            4) systemctl restart "$SERVICE"; printf '\nBot: %s\n' "$(systemctl is-active "$SERVICE")"; pause ;;
+            5) clear; logs 80; pause ;;
+            6) login_vnc; pause ;;
+            7) printf '\nBackup: %s\n' "$(backup)"; pause ;;
+            0) clear; exit 0 ;;
+            *) printf '\nPilihan tidak ada.\n'; pause ;;
+        esac
+    done
+}
+
+need_server
+[ "$#" -gt 0 ] && { run_action "$@"; exit; }
+menu
