@@ -24,7 +24,66 @@ backup() {
 
 logs() { journalctl -u "$SERVICE" -n "${1:-50}" --no-pager; }
 
+ensure_vnc() {
+    # Auto-install VNC stack jika belum ada (mesin CLI/headless).
+    if ! command -v Xvfb >/dev/null 2>&1 || ! command -v x11vnc >/dev/null 2>&1 || ! command -v websockify >/dev/null 2>&1; then
+        printf '%s\n' 'VNC belum terpasang. Menginstall xvfb x11vnc novnc websockify...'
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb x11vnc novnc websockify
+    fi
+    # Buat unit systemd jika belum ada (self-heal setup lama).
+    if [ ! -f /etc/systemd/system/agenpulsa-display.service ]; then
+        cat > /etc/systemd/system/agenpulsa-display.service <<'UNIT'
+[Unit]
+Description=Virtual display for AgenPulsa login
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1366x900x24 -nolisten tcp
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+        cat > /etc/systemd/system/agenpulsa-vnc.service <<'UNIT'
+[Unit]
+Description=Local VNC for AgenPulsa login
+After=agenpulsa-display.service
+Requires=agenpulsa-display.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/x11vnc -display :99 -rfbauth /root/.vnc/agenpulsa.pass -localhost -forever -shared
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+        cat > /etc/systemd/system/agenpulsa-novnc.service <<'UNIT'
+[Unit]
+Description=Local noVNC for AgenPulsa login
+After=agenpulsa-vnc.service
+Requires=agenpulsa-vnc.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/websockify --web /usr/share/novnc 0.0.0.0:6080 localhost:5900
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+        systemctl daemon-reload
+    fi
+    # Password VNC jika belum ada.
+    if [ ! -f /root/.vnc/agenpulsa.pass ]; then
+        install -d -m 700 /root/.vnc
+        x11vnc -storepasswd agenpulsa /root/.vnc/agenpulsa.pass >/dev/null
+    fi
+}
+
 login_vnc() {
+    ensure_vnc
     systemctl start agenpulsa-display.service agenpulsa-vnc.service agenpulsa-novnc.service
     trap 'systemctl stop agenpulsa-novnc.service agenpulsa-vnc.service agenpulsa-display.service' EXIT INT TERM
     ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -n 1)
