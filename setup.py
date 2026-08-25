@@ -177,7 +177,13 @@ WantedBy=multi-user.target
             user = os.getenv("USER", "root")
             # Pakai nama service yang sudah ada supaya tidak double.
             svc_name = existing[0] if existing else "agenpulsa"
-            svc = f"""[Unit]
+
+            if svc_name in existing:
+                # Service sudah ada: jangan buat ulang, cukup reload + restart.
+                print(f"[INFO] Service '{svc_name}' sudah terpasang. Tidak membuat duplikat, hanya reload + restart.")
+                subprocess.run("systemctl daemon-reload", shell=True)
+            else:
+                svc = f"""[Unit]
 Description=AgenPulsa Telegram Bot
 After=network.target
 
@@ -192,18 +198,15 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 """
-            with open(f"{svc_name}.service", "w") as f:
-                f.write(svc)
-            if svc_name in existing:
-                print(f"[INFO] Service '{svc_name}' sudah ada. Memperbarui unit file...")
-            else:
+                with open(f"{svc_name}.service", "w") as f:
+                    f.write(svc)
                 print(f"[INFO] File '{svc_name}.service' dibuat. Memasang otomatis...")
-            for c in (f"cp {svc_name}.service /etc/systemd/system/{svc_name}.service",
-                      "systemctl daemon-reload",
-                      f"systemctl enable {svc_name}"):
-                r = subprocess.run(c, shell=True)
-                if r.returncode != 0:
-                    subprocess.run(f"sudo {c}", shell=True)
+                for c in (f"cp {svc_name}.service /etc/systemd/system/{svc_name}.service",
+                          "systemctl daemon-reload",
+                          f"systemctl enable {svc_name}"):
+                    r = subprocess.run(c, shell=True)
+                    if r.returncode != 0:
+                        subprocess.run(f"sudo {c}", shell=True)
 
             env_token = ""
             if os.path.exists(".env"):
