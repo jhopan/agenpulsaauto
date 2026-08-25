@@ -37,9 +37,11 @@ def main():
     
     print("\n[3/4] Menyiapkan File Konfigurasi...")
     if not os.path.exists(".env"):
+        token = input("Masukkan Token Bot Telegram (dari BotFather): ").strip()
+        allowed = input("Masukkan ID Telegram yang diizinkan (pisahkan koma, kosong = semua): ").strip()
         with open(".env", "w") as f:
-            f.write("TELEGRAM_TOKEN=ISI_TOKEN_BOT_DISINI\nALLOWED_IDS=\n")
-        print("File .env berhasil dibuat dari template.")
+            f.write(f"TELEGRAM_TOKEN={token or 'ISI_TOKEN_BOT_DISINI'}\nALLOWED_IDS={allowed}\n")
+        print("File .env berhasil dibuat.")
     else:
         print("File .env sudah ada, dilewati.")
         
