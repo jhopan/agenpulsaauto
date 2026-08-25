@@ -88,14 +88,18 @@ DISPLAY=:99 {py} bot.py --login
                 subprocess.run(["sudo", "cp", tmp2, "/usr/local/bin/agenpulsa-login"])
             os.remove(tmp2)
 
-            # VNC login on-demand (opsi 6 menu). Auto-install jika belum ada.
+            # VNC login on-demand (opsi 6 menu).
             import shutil
-            if not all(shutil.which(b) for b in ("Xvfb", "x11vnc", "websockify")):
-                print("[INFO] Menginstall VNC stack (xvfb, x11vnc, novnc, websockify)...")
-                r = subprocess.run("apt-get install -y xvfb x11vnc novnc websockify", shell=True)
-                if r.returncode != 0:
-                    subprocess.run("sudo apt-get install -y xvfb x11vnc novnc websockify", shell=True)
-            if all(shutil.which(b) for b in ("Xvfb", "x11vnc", "websockify")):
+            vnc_ready = all(shutil.which(b) for b in ("Xvfb", "x11vnc", "websockify"))
+            if not vnc_ready:
+                jawab = input("\nInstall VNC untuk login via browser virtual? (y/n): ").strip().lower()
+                if jawab == "y":
+                    print("[INFO] Menginstall VNC stack (xvfb, x11vnc, novnc, websockify)...")
+                    r = subprocess.run("apt-get install -y xvfb x11vnc novnc websockify", shell=True)
+                    if r.returncode != 0:
+                        subprocess.run("sudo apt-get install -y xvfb x11vnc novnc websockify", shell=True)
+                    vnc_ready = all(shutil.which(b) for b in ("Xvfb", "x11vnc", "websockify"))
+            if vnc_ready:
                 vnc_units = {
                     "agenpulsa-display.service": """[Unit]
 Description=Virtual display for AgenPulsa login
@@ -153,7 +157,17 @@ WantedBy=multi-user.target
             else:
                 print("[INFO] Login via VNC butuh: sudo apt install -y xvfb x11vnc novnc websockify")
 
-        print("Pilih service manager untuk menjalankan bot non-stop:")
+        # Deteksi service yang sudah terpasang supaya tidak double.
+        existing = []
+        for name in ("agenpulsa", "agenpulsaauto"):
+            unit = f"/etc/systemd/system/{name}.service"
+            if os.path.exists(unit):
+                existing.append(name)
+        if existing:
+            print(f"\n[INFO] Service sudah terpasang: {', '.join(existing)}.")
+            print("Setup akan memperbarui unit file dan tidak membuat duplikat.")
+
+        print("\nPilih service manager untuk menjalankan bot non-stop:")
         print("1. Systemd (Default Linux Server, Direkomendasikan)")
         print("2. PM2 (Membutuhkan NodeJS terinstall)")
         print("3. Lewati (Jalankan manual)")
@@ -161,6 +175,8 @@ WantedBy=multi-user.target
         
         if pil == "1":
             user = os.getenv("USER", "root")
+            # Pakai nama service yang sudah ada supaya tidak double.
+            svc_name = existing[0] if existing else "agenpulsa"
             svc = f"""[Unit]
 Description=AgenPulsa Telegram Bot
 After=network.target
@@ -176,12 +192,12 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 """
-            with open("agenpulsa.service", "w") as f:
+            with open(f"{svc_name}.service", "w") as f:
                 f.write(svc)
-            print("[INFO] File 'agenpulsa.service' dibuat. Memasang otomatis...")
-            for c in ("cp agenpulsa.service /etc/systemd/system/agenpulsa.service",
+            print(f"[INFO] File '{svc_name}.service' dibuat. Memasang otomatis...")
+            for c in (f"cp {svc_name}.service /etc/systemd/system/{svc_name}.service",
                       "systemctl daemon-reload",
-                      "systemctl enable agenpulsa"):
+                      f"systemctl enable {svc_name}"):
                 r = subprocess.run(c, shell=True)
                 if r.returncode != 0:
                     subprocess.run(f"sudo {c}", shell=True)
@@ -192,13 +208,13 @@ WantedBy=multi-user.target
                     if line.startswith("TELEGRAM_TOKEN="):
                         env_token = line.split("=", 1)[1].strip()
             if env_token and "ISI_TOKEN" not in env_token:
-                r = subprocess.run("systemctl restart agenpulsa", shell=True)
+                r = subprocess.run(f"systemctl restart {svc_name}", shell=True)
                 if r.returncode != 0:
-                    subprocess.run("sudo systemctl restart agenpulsa", shell=True)
-                subprocess.run("systemctl --no-pager status agenpulsa", shell=True)
+                    subprocess.run(f"sudo systemctl restart {svc_name}", shell=True)
+                subprocess.run(f"systemctl --no-pager status {svc_name}", shell=True)
             else:
-                print("\n[INFO] Token bot belum diisi di .env. Setelah diisi, aktifkan dengan:")
-                print("  sudo systemctl start agenpulsa")
+                print(f"\n[INFO] Token bot belum diisi di .env. Setelah diisi, aktifkan dengan:")
+                print(f"  sudo systemctl start {svc_name}")
             
         elif pil == "2":
             run(f"pm2 start tgbot.py --interpreter {py} --name agenpulsa")

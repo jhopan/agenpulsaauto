@@ -141,11 +141,45 @@ def run_order(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False):
             ctx.close()
 
 
+def import_cookies(filepath):
+    """Inject cookies dari export Cookie-Editor (JSON array) ke profile Playwright."""
+    with open(filepath, encoding="utf-8") as f:
+        raw = json.load(f)
+    cookies = []
+    for c in raw:
+        if not c.get("name") or "value" not in c:
+            continue
+        entry = {
+            "name": c["name"],
+            "value": c["value"],
+            "domain": c.get("domain", ".isipulsa.web.id"),
+            "path": c.get("path", "/"),
+            "httpOnly": bool(c.get("httpOnly", False)),
+            "secure": bool(c.get("secure", False)),
+        }
+        exp = c.get("expirationDate")
+        if exp:
+            entry["expires"] = int(exp)
+        ss = str(c.get("sameSite", "")).lower()
+        entry["sameSite"] = {"strict": "Strict", "lax": "Lax", "no_restriction": "None"}.get(ss, "Lax")
+        cookies.append(entry)
+    if not cookies:
+        return "GAGAL: tidak ada cookie valid di file."
+    with sync_playwright() as p:
+        ctx = p.chromium.launch_persistent_context(PROFILE, headless=True, viewport={"width": 1366, "height": 900})
+        try:
+            ctx.add_cookies(cookies)
+        finally:
+            ctx.close()
+    return f"OK: {len(cookies)} cookie diinject ke profile/. Cek dengan: python bot.py --nomor 0812 --cari test --dry-run"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--login", action="store_true", help="buka browser untuk login manual, cookies tersimpan di folder profile")
     ap.add_argument("--logout", action="store_true", help="hapus sesi login (untuk ganti akun)")
     ap.add_argument("--import-zip", help="import folder profile/cookies dari file zip")
+    ap.add_argument("--import-cookies", help="inject cookies dari export Cookie-Editor (JSON) ke profile")
     ap.add_argument("--nomor", help="nomor HP tujuan")
     ap.add_argument("--tab", default="Paket Kuota", help="nama tab produk, misal: Pulsa, Paket Kuota, Paket Internet")
     ap.add_argument("--cari", help="kata kunci paket untuk dicari (ctrl+f style)")
@@ -178,6 +212,17 @@ def main():
             print("Berhasil mengimpor cookies dari file zip.")
         except Exception as e:
             print(f"Error saat impor zip: {e}")
+        return
+
+    if args.import_cookies:
+        filepath = args.import_cookies
+        if not os.path.isfile(filepath):
+            print(f"Error: file '{filepath}' tidak ditemukan.")
+            return
+        try:
+            print(import_cookies(filepath))
+        except Exception as e:
+            print(f"Error saat inject cookies: {e}")
         return
 
     if args.login:

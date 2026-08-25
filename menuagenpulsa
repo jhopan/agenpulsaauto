@@ -135,6 +135,7 @@ menu() {
         printf ' [5] Lihat log bot\n'
         printf ' [6] Login Isipulsa via VNC (sementara)\n'
         printf ' [7] Backup aplikasi + cookie\n'
+        printf ' [8] Inject cookies dari file JSON (Cookie-Editor)\n'
         printf ' [0] Keluar\n\n'
         printf ' Pilih: '
         read -r choice || exit 0
@@ -146,6 +147,8 @@ menu() {
             5) clear; logs 80; pause ;;
             6) login_vnc; pause ;;
             7) printf '\nBackup: %s\n' "$(backup)"; pause ;;
+            8) printf '\nPath file JSON cookies (export Cookie-Editor): '; read -r cfile || exit 0
+               if [ -z "$cfile" ]; then printf 'Dibatalkan.\n'; else (cd "$APP_DIR" && "$PYTHON" -c "import sys; from bot import import_cookies; print(import_cookies(sys.argv[1]))" "$cfile"); fi; pause ;;
             0) clear; exit 0 ;;
             *) printf '\nPilihan tidak ada.\n'; pause ;;
         esac
