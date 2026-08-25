@@ -142,7 +142,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("sc:"):
         sc = SHORTCUTS[int(data.split(":")[1])]
-        pending[uid] = {"tab": sc["tab"], "cari": sc["cari"], "voucher": sc.get("voucher"), "label": sc["label"], "harga_max": sc.get("harga_max")}
+        pending[uid] = {"tab": sc["tab"], "cari": sc["cari"], "voucher": sc.get("voucher"), "label": sc["label"], "harga_max": sc.get("harga_max"), "harga_jual": sc.get("harga_jual", 0)}
         await q.answer()
         if contacts:
             await q.edit_message_text(f"Paket: {sc['label']}\nPilih nomor tujuan:", reply_markup=contact_kb("nomor"))
@@ -236,7 +236,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         await q.edit_message_text("Memproses order, tunggu...")
         result = await asyncio.to_thread(run_order, job["nomor"], job["tab"], cari=job.get("cari"), voucher=job.get("voucher"),
-                                         label=job.get("label"), harga_max=job.get("harga_max"))
+                                         label=job.get("label"), harga_max=job.get("harga_max"), harga_jual=job.get("harga_jual", 0))
         pending.pop(uid, None)
         await ctx.bot.send_message(uid, result)
         await kirim_error_screenshot(ctx, uid, result)
@@ -268,7 +268,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("js:"):
         sc = SHORTCUTS[int(data.split(":")[1])]
-        job = {"mode": "jadwal_kontak", "tab": sc["tab"], "cari": sc["cari"], "voucher": sc.get("voucher"), "label": sc["label"], "harga_max": sc.get("harga_max")}
+        job = {"mode": "jadwal_kontak", "tab": sc["tab"], "cari": sc["cari"], "voucher": sc.get("voucher"), "label": sc["label"], "harga_max": sc.get("harga_max"), "harga_jual": sc.get("harga_jual", 0)}
         pending[uid] = job
         await q.answer()
         if contacts:
@@ -376,6 +376,17 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if mode == "add_sc_label":
         label = text
+        job["label"] = label
+        job["mode"] = "add_sc_harga_jual"
+        await update.message.reply_text(f"Label: '{label}'\n\nKirim harga jual ke pelanggan dalam rupiah (contoh: 15000). Kirim 0 jika tidak dijual/pakai sendiri:")
+        return
+
+    if mode == "add_sc_harga_jual":
+        digits = re.sub(r"[^\d]", "", text)
+        if not digits:
+            await update.message.reply_text("Kirim angka rupiah, contoh: 15000 (atau 0):")
+            return
+        job["harga_jual"] = int(digits)
         tab = job["tab"]
         cari = job["cari"]
         nomor_pancingan = job["nomor_pancingan"]
@@ -395,17 +406,19 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             voucher = paket.get("voucher")
             
             SHORTCUTS.append({
-                "label": label,
+                "label": job["label"],
                 "tab": tab,
                 "cari": cari,
                 "voucher": voucher,
-                "harga_max": parse_harga(paket.get("harga", ""))
+                "harga_max": parse_harga(paket.get("harga", "")),
+                "harga_jual": job["harga_jual"]
             })
             save_shortcuts()
             pending.pop(uid, None)
             
+            jual_txt = f"Harga jual: Rp {job['harga_jual']:,}".replace(",", ".") if job["harga_jual"] else "Harga jual: - (pakai sendiri)"
             await update.message.reply_text(
-                f"Shortcut berhasil ditambahkan!\n\nLabel: {label}\nPaket: {paket.get('teks')}\nVoucher ID: {voucher}",
+                f"Shortcut berhasil ditambahkan!\n\nLabel: {job['label']}\nPaket: {paket.get('teks')}\nVoucher ID: {voucher}\n{jual_txt}",
                 reply_markup=menu_kb()
             )
         except Exception as e:
@@ -474,6 +487,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "cari": job["cari"],
             "voucher": job.get("voucher"),
             "harga_max": job.get("harga_max"),
+            "harga_jual": job.get("harga_jual", 0),
             "nomor": job["nomor"],
             "jam": f"{jam:02d}:{menit:02d}",
             "chat_id": uid,
@@ -531,6 +545,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "cari": job["cari"],
             "voucher": job.get("voucher"),
             "harga_max": job.get("harga_max"),
+            "harga_jual": job.get("harga_jual", 0),
             "nomor": job["nomor"],
             "jam": run_at.strftime("%d/%m/%Y %H:%M"),
             "chat_id": uid,
@@ -564,6 +579,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "cari": job["cari"],
             "voucher": job.get("voucher"),
             "harga_max": job.get("harga_max"),
+            "harga_jual": job.get("harga_jual", 0),
             "nomor": job["nomor"],
             "jam": f"{jam:02d}:{menit:02d}",
             "interval_hari": n_hari,
@@ -623,7 +639,7 @@ async def scheduled_order(ctx: ContextTypes.DEFAULT_TYPE):
         save_schedules()
     
     result = await asyncio.to_thread(run_order, sched["nomor"], sched["tab"], cari=sched.get("cari"), voucher=sched.get("voucher"),
-                                     label=sched.get("label"), harga_max=sched.get("harga_max"))
+                                     label=sched.get("label"), harga_max=sched.get("harga_max"), harga_jual=sched.get("harga_jual", 0))
     await ctx.bot.send_message(sched["chat_id"], f"[JADWAL {sched['jam']} WIB] {sched['label']}\n{result}")
     await kirim_error_screenshot(ctx, sched["chat_id"], result)
 

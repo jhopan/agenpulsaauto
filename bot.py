@@ -34,13 +34,14 @@ def parse_harga(teks):
     return int(digits) if digits else 0
 
 
-def log_order(label, nomor, hasil, harga=0, order_id=None):
+def log_order(label, nomor, hasil, harga=0, order_id=None, harga_jual=0):
     """Append satu entri riwayat order ke orders.json."""
     entry = {
         "waktu": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "label": label or "-",
         "nomor": nomor,
         "harga": harga,
+        "harga_jual": harga_jual or 0,
         "order_id": order_id,
         "sukses": hasil.startswith("ORDER SUKSES"),
         "hasil": hasil[:300],
@@ -82,7 +83,12 @@ def report_orders(period="harian"):
     sukses = [r for r in rows if r["sukses"]]
     gagal = [r for r in rows if not r["sukses"]]
     total = sum(r.get("harga", 0) for r in sukses)
-    lines = [judul, f"Order sukses: {len(sukses)} | Gagal: {len(gagal)}", f"Total keluar: Rp {total:,}".replace(",", ".")]
+    omzet = sum(r.get("harga_jual", 0) for r in sukses)
+    profit = omzet - total
+    lines = [judul, f"Order sukses: {len(sukses)} | Gagal: {len(gagal)}",
+             f"Modal keluar: Rp {total:,}".replace(",", "."),
+             f"Omzet jual: Rp {omzet:,}".replace(",", "."),
+             f"Profit: Rp {profit:,}".replace(",", ".")]
     if sukses:
         lines.append("\nSukses:")
         for r in sukses[-10:]:
@@ -141,7 +147,7 @@ def search_packages(tab, keyword, nomor="081234567890"):
             ctx.close()
 
 
-def run_order(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False, label=None, harga_max=None):
+def run_order(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False, label=None, harga_max=None, harga_jual=0):
     if is_maintenance():
         return maintenance_message()
     hasil = _run_order_impl(nomor, tab, cari=cari, voucher=voucher, dry_run=dry_run, headed=headed, harga_max=harga_max)
@@ -149,7 +155,8 @@ def run_order(nomor, tab, cari=None, voucher=None, dry_run=False, headed=False, 
         m = re.search(r"ID: (\d+)", hasil)
         log_order(label or cari or voucher or tab, nomor, hasil,
                   harga=parse_harga(re.search(r"Harga: (Rp[\d.]+)", hasil).group(1)) if re.search(r"Harga: (Rp[\d.]+)", hasil) else 0,
-                  order_id=m.group(1) if m else None)
+                  order_id=m.group(1) if m else None,
+                  harga_jual=harga_jual)
     return hasil
 
 
