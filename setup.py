@@ -194,7 +194,10 @@ WantedBy=multi-user.target
 """
             with open(f"{svc_name}.service", "w") as f:
                 f.write(svc)
-            print(f"[INFO] File '{svc_name}.service' dibuat. Memasang otomatis...")
+            if svc_name in existing:
+                print(f"[INFO] Service '{svc_name}' sudah ada. Memperbarui unit file...")
+            else:
+                print(f"[INFO] File '{svc_name}.service' dibuat. Memasang otomatis...")
             for c in (f"cp {svc_name}.service /etc/systemd/system/{svc_name}.service",
                       "systemctl daemon-reload",
                       f"systemctl enable {svc_name}"):
