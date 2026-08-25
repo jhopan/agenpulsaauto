@@ -88,8 +88,13 @@ DISPLAY=:99 {py} bot.py --login
                 subprocess.run(["sudo", "cp", tmp2, "/usr/local/bin/agenpulsa-login"])
             os.remove(tmp2)
 
-            # VNC login on-demand (opsi 6 menu) hanya jika stack VNC terpasang.
+            # VNC login on-demand (opsi 6 menu). Auto-install jika belum ada.
             import shutil
+            if not all(shutil.which(b) for b in ("Xvfb", "x11vnc", "websockify")):
+                print("[INFO] Menginstall VNC stack (xvfb, x11vnc, novnc, websockify)...")
+                r = subprocess.run("apt-get install -y xvfb x11vnc novnc websockify", shell=True)
+                if r.returncode != 0:
+                    subprocess.run("sudo apt-get install -y xvfb x11vnc novnc websockify", shell=True)
             if all(shutil.which(b) for b in ("Xvfb", "x11vnc", "websockify")):
                 vnc_units = {
                     "agenpulsa-display.service": """[Unit]
