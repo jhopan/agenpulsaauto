@@ -47,7 +47,21 @@ settings = json.load(open(SETTINGS_FILE, encoding="utf-8")) if os.path.exists(SE
 
 pending = {}
 
-NOMOR_RE = re.compile(r"^(08|\+62|62)\d{8,13}$")
+
+def normalize_nomor(text):
+    """Normalisasi nomor HP ke format 08xxx.
+    Contoh: 628777... / +62877... / 62 877... / 0821-0889... -> 08...
+    Return None jika bukan nomor Indonesia valid."""
+    digits = re.sub(r"[^\d]", "", text or "")
+    if not digits:
+        return None
+    if digits.startswith("62"):
+        digits = "0" + digits[2:]
+    if not digits.startswith("08") or not (10 <= len(digits) <= 15):
+        return None
+    return digits
+
+
 JAM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 TANGGAL_JAM_RE = re.compile(r"^\s*(\d{1,2})\s*[-/]\s*(\d{1,2})(?:\s*[-/]\s*(\d{2}|\d{4}))?\s+([01]?\d|2[0-3])\s*:\s*([0-5]\d)\s*$")
 INTERVAL_RE = re.compile(r"^\s*(\d{1,2})\s+([01]?\d|2[0-3])\s*:\s*([0-5]\d)\s*$")
@@ -359,8 +373,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode == "add_sc_nomor":
-        nomor = text.replace("-", "").replace(" ", "")
-        if not NOMOR_RE.match(nomor):
+        nomor = normalize_nomor(text)
+        if not nomor:
             await update.message.reply_text("Nomor tidak valid. Kirim nomor format 08xxxxxxxxxx:")
             return
         job["nomor_pancingan"] = nomor
@@ -434,8 +448,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode == "kontak_nomor":
-        nomor = text.replace("-", "").replace(" ", "")
-        if not NOMOR_RE.match(nomor):
+        nomor = normalize_nomor(text)
+        if not nomor:
             await update.message.reply_text("Nomor tidak valid. Format 08xxxxxxxxxx:")
             return
         contacts[job["kontak_nama"]] = nomor
@@ -457,8 +471,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if job.get("tunggu_nomor"):
-        nomor = text.replace("-", "").replace(" ", "")
-        if not NOMOR_RE.match(nomor):
+        nomor = normalize_nomor(text)
+        if not nomor:
             await update.message.reply_text("Nomor tidak valid. Format 08xxxxxxxxxx:")
             return
         job["nomor"] = nomor
@@ -602,8 +616,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if "cari" in job and "nomor" not in job:
-        nomor = text.replace("-", "").replace(" ", "")
-        if not NOMOR_RE.match(nomor):
+        nomor = normalize_nomor(text)
+        if not nomor:
             await update.message.reply_text("Nomor tidak valid. Kirim nomor format 08xxxxxxxxxx:")
             return
         job["nomor"] = nomor
